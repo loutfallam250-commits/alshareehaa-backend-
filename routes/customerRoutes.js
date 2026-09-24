@@ -520,10 +520,32 @@ router.post("/auth/forgot/verify", authLimiter, async (req, res) => {
 });
 
 
-// ?????????????????????????????????????????????????????????????????????????????
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/customers/orders/claim
+// Links guest orders (matched by phone/whatsapp) to the logged-in customer
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/orders/claim", requireCustomer, async (req, res) => {
+  try {
+    const Checkout = require("../models/Checkout");
+    const customer = await Customer.findById(req.customer.id, "phone");
+    if (!customer?.phone) return res.json({ claimed: 0 });
+
+    const phone = customer.phone.trim();
+    const result = await Checkout.updateMany(
+      { whatsapp: phone, userId: { $in: [null, ""] } },
+      { $set: { userId: String(req.customer.id) } }
+    );
+    res.json({ claimed: result.modifiedCount || 0 });
+  } catch (err) {
+    console.error("orders/claim error:", err.message);
+    res.status(500).json({ error: "خطأ في الخادم" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /api/customers/orders
 // Returns orders for the authenticated customer
-// ?????????????????????????????????????????????????????????????????????????????
+// ─────────────────────────────────────────────────────────────────────────────
 router.get("/orders", requireCustomer, async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
