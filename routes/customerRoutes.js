@@ -21,6 +21,10 @@ const authLimiter = rateLimit({
   message: { error: "محاولات كثيرة، حاول بعد 15 دقيقة" },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => {
+    const email = (req.body?.email || "").toLowerCase().trim();
+    return email || req.ip;
+  },
 });
 
 const otpLimiter = rateLimit({
@@ -29,6 +33,12 @@ const otpLimiter = rateLimit({
   message: { error: "تم تجاوز الحد المسموح لطلبات OTP، حاول بعد ساعة" },
   standardHeaders: true,
   legacyHeaders: false,
+  // Key by email (from body) instead of IP so that BFF-proxied requests
+  // are not all counted against the same IP (the Next.js server address).
+  keyGenerator: (req) => {
+    const email = (req.body?.email || "").toLowerCase().trim();
+    return email || req.ip;
+  },
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
