@@ -105,7 +105,10 @@ router.get("/auth/check-email", async (req, res) => {
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.json({ exists: false });
     }
-    const exists = await Customer.exists({ email, verified: true });
+    const exists = await Customer.exists({
+      email,
+      $or: [{ verified: true }, { emailVerified: true }],
+    });
     res.json({ exists: !!exists });
   } catch {
     res.status(500).json({ error: "خطأ في الخادم" });
@@ -133,7 +136,7 @@ router.post("/auth/register/request", otpLimiter, async (req, res) => {
 
     const existing = await Customer.findOne({ email: email.toLowerCase().trim() });
     if (existing) {
-      if (existing.verified) {
+      if (existing.verified || existing.emailVerified) {
         return res.status(409).json({ error: "هذا البريد الإلكتروني مسجل مسبقًا" });
       }
 
@@ -185,7 +188,7 @@ router.post("/auth/register/request", otpLimiter, async (req, res) => {
     );
 
     // Return OTP to BFF only — BFF emails it and never forwards to browser
-    res.json({ _otp: otp });
+    res.json({ _otp: otp, cooldown: Math.ceil(OTP_COOLDOWN_MS / 1000) });
   } catch (err) {
     console.error("register/request error:", err.message);
     res.status(500).json({ error: "خطأ في الخادم" });
