@@ -241,7 +241,8 @@ router.post("/auth/register/verify", authLimiter, async (req, res) => {
     if (lastName && typeof lastName === "string" && lastName.trim().length >= 2) customer.lastName = lastName.trim();
     if (phone && typeof phone === "string" && phone.trim()) customer.phone = phone.trim();
     if (password && String(password).length >= 6) {
-      customer.password = await bcrypt.hash(password, 12);
+      // Assign plain text — the pre-save hook will hash it once
+      customer.password = password;
     }
     customer.pendingOtp = { hash: null, expiresAt: null, attempts: 0, cooldownUntil: null };
     await customer.save();
