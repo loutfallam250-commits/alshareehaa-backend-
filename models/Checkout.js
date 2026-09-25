@@ -42,7 +42,15 @@ const checkoutSchema = new mongoose.Schema(
     installmentType: { type: String, enum: ["installment", "full"], default: "full" },
     months: { type: Number, default: 0 },
     monthlyPayment: { type: Number, default: 0 },
-    status: { type: String, enum: ["pending", "confirmed", "cancelled"], default: "pending" },
+    status: {
+      type: String,
+      enum: [
+        "pending", "confirmed", "processing",
+        "ready_to_ship", "shipped", "out_for_delivery",
+        "delivered", "cancelled",
+      ],
+      default: "pending",
+    },
     shipping: {
       companyId: { type: String },
       companyName: { type: String },
@@ -64,5 +72,7 @@ checkoutSchema.index({ createdAt: -1 });
 checkoutSchema.index({ whatsapp: 1 });
 checkoutSchema.index({ nationalId: 1 });
 checkoutSchema.index({ status: 1 });
+// Compound index for customer order queries (list + count in one plan)
+checkoutSchema.index({ userId: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Checkout", checkoutSchema);

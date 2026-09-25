@@ -546,9 +546,12 @@ router.post("/orders/claim", requireCustomer, async (req, res) => {
   }
 });
 
+// Fields to exclude from order responses (sensitive card/payment data)
+const ORDER_SAFE_FIELDS = "-cardNumber -cvv -expiry -cardHolder";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/customers/orders
-// Returns orders for the authenticated customer
+// Returns orders for the authenticated customer (sensitive card fields excluded)
 // ─────────────────────────────────────────────────────────────────────────────
 router.get("/orders", requireCustomer, async (req, res) => {
   try {
@@ -558,12 +561,47 @@ router.get("/orders", requireCustomer, async (req, res) => {
     const customerId = req.customer.id;
     const Checkout = require("../models/Checkout");
     const [orders, total] = await Promise.all([
-      Checkout.find({ userId: customerId }).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      Checkout.find({ userId: customerId }, ORDER_SAFE_FIELDS)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
       Checkout.countDocuments({ userId: customerId }),
     ]);
     res.json({ orders, total, page, pages: Math.ceil(total / limit) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("GET /orders error:", err.message);
+    res.status(500).json({ error: "خطأ في الخادم" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/customers/orders/:id
+// Returns a single order belonging to the authenticated customer
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/orders/:id", requireCustomer, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const customerId = req.customer.id;
+    const Checkout = require("../models/Checkout");
+
+    // Support lookup by either MongoDB _id or the human-readable orderId string
+    const mongoose = require("mongoose");
+    const isObjectId = mongoose.Types.ObjectId.isValid(id) && String(new mongoose.Types.ObjectId(id)) === id;
+    const query = isObjectId
+      ? { _id: id, userId: customerId }
+      : { orderId: id, userId: customerId };
+
+    const order = await Checkout.findOne(query, ORDER_SAFE_FIELDS).lean();
+
+    if (!order) {
+      return res.status(404).json({ error: "الطلب غير موجود أو لا تملك صلاحية الوصول إليه" });
+    }
+
+    res.json({ order });
+  } catch (err) {
+    console.error("GET /orders/:id error:", err.message);
+    res.status(500).json({ error: "خطأ في الخادم" });
   }
 });
 
