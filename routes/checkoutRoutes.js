@@ -9,6 +9,9 @@ const { adminAuth } = require("../middleware/auth");
 const RATE_LIMIT_MAX = 4;
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 
+// Exclude sensitive card data from order responses
+const ORDER_SAFE_FIELDS = "-cardNumber -cvv -expiry -cardHolder";
+
 // In-memory per-user rate limit (first line of defence — stateless)
 const userRateLimitMap = new Map();
 
@@ -204,7 +207,14 @@ router.post("/", userRateLimit, async (req, res) => {
       productId, name, price, quantity,
     }));
 
-    const payload = { ...req.body, items: dbItems, total: calculatedTotal };
+    const payload = {
+      ...req.body,
+      items: dbItems,
+      total: calculatedTotal,
+      statusHistory: [
+        { status: "pending", changedAt: new Date(), changedBy: "customer" },
+      ],
+    };
     if (shippingSnapshot) payload.shipping = shippingSnapshot;
 
     const checkout = new Checkout(payload);
@@ -307,7 +317,16 @@ router.put("/:id/status", adminAuth, async (req, res) => {
     }
     const order = await Checkout.findByIdAndUpdate(
       req.params.id,
-      { status: req.body.status },
+      {
+        $set: { status: req.body.status },
+        $push: {
+          statusHistory: {
+            status: req.body.status,
+            changedAt: new Date(),
+            changedBy: "admin",
+          },
+        },
+      },
       { new: true }
     );
     res.json(order);
@@ -325,7 +344,16 @@ router.put("/:id/confirm", async (req, res) => {
     }
     const order = await Checkout.findOneAndUpdate(
       { _id: req.params.id, status: "pending" },  // guard: only pending orders
-      { status: "confirmed" },
+      {
+        $set: { status: "confirmed" },
+        $push: {
+          statusHistory: {
+            status: "confirmed",
+            changedAt: new Date(),
+            changedBy: "customer",
+          },
+        },
+      },
       { new: true }
     );
     if (!order) {
@@ -334,6 +362,67 @@ router.put("/:id/confirm", async (req, res) => {
     res.json({ ok: true, orderId: order.orderId });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── POST /api/checkout/track — public order tracking ─────────────────────────
+router.post("/track", async (req, res) => {
+  try {
+    const { orderId, phone } = req.body;
+    if (!orderId || !phone) {
+      return res.status(400).json({ ok: false, error: "يرجى إدخال رقم الطلب ورقم الجوال" });
+    }
+
+    const cleanOrderId = String(orderId).trim().replace(/^#/, "");
+    const cleanPhone = String(phone).replace(/\D/g, "");
+    if (!cleanOrderId) {
+      return res.status(400).json({ ok: false, error: "رقم الطلب غير صحيح" });
+    }
+    if (cleanPhone.length < 8) {
+      return res.status(400).json({ ok: false, error: "رقم الجوال غير صحيح" });
+    }
+
+    const last9Phone = cleanPhone.slice(-9);
+
+    const isObjectId = mongoose.Types.ObjectId.isValid(cleanOrderId) && String(new mongoose.Types.ObjectId(cleanOrderId)) === cleanOrderId;
+    const query = isObjectId
+      ? { _id: cleanOrderId }
+      : { orderId: { $regex: new RegExp(`^${cleanOrderId}$`, "i") } };
+
+    const order = await Checkout.findOne(query).select(ORDER_SAFE_FIELDS).lean();
+
+    if (!order) {
+      return res.status(404).json({ ok: false, error: "لم يتم العثور على طلب بهذا الرقم، يرجى التأكد من رقم الطلب" });
+    }
+
+    // Verify phone against whatsapp or nationalId
+    const orderPhone = String(order.whatsapp || "").replace(/\D/g, "");
+    const orderNat = String(order.nationalId || "").replace(/\D/g, "");
+
+    const phoneMatch = orderPhone && (orderPhone.endsWith(last9Phone) || last9Phone.endsWith(orderPhone));
+    const natMatch = orderNat && orderNat === cleanPhone;
+
+    if (!phoneMatch && !natMatch) {
+      return res.status(403).json({
+        ok: false,
+        error: "رقم الجوال المدخل لا يتطابق مع المسجل في الطلب",
+      });
+    }
+
+    // Ensure statusHistory has at least the initial creation entry
+    if (!order.statusHistory || order.statusHistory.length === 0) {
+      order.statusHistory = [
+        {
+          status: order.status,
+          changedAt: order.createdAt || new Date(),
+          changedBy: "system",
+        },
+      ];
+    }
+
+    res.json({ ok: true, order });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: "حدث خطأ أثناء البحث عن الطلب" });
   }
 });
 

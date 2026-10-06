@@ -51,6 +51,13 @@ const checkoutSchema = new mongoose.Schema(
       ],
       default: "pending",
     },
+    statusHistory: [
+      {
+        status: { type: String },
+        changedAt: { type: Date, default: Date.now },
+        changedBy: { type: String, default: "system" },
+      },
+    ],
     shipping: {
       companyId: { type: String },
       companyName: { type: String },
